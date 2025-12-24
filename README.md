@@ -10,8 +10,10 @@
   - 可选参数：
     - `--questions <数字>` 设置最多提问次数，默认 10
     - `--features "<特征1,特征2,...>"` 设置候选特征列表（逗号分隔）
+    - `--answers "<是/否,...>"` 预置回答序列（支持 `是/否`、`y/yes`、`n/no`）
   - 示例：
     - `.\\.venv\\Scripts\\python.exe main.py --questions 5 --features "是科幻片,主角是女性,获得过奥斯卡"`
+    - `.\\.venv\\Scripts\\python.exe main.py --questions 3 --features "是1990年后的,是科幻片,主角是女性" --answers "是,否,是"`
 - 演示模式（只打印首个问题）：
   - `.\\.venv\\Scripts\\python.exe main.py --demo`
 

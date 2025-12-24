@@ -10,6 +10,7 @@ class GameState(TypedDict):
     message: str
     player_answer: str
     features: List[str]
+    final_guess: str
 
 def generate_question_node(state: GameState):
     if state["remaining_questions"] <= 0:
@@ -34,6 +35,7 @@ def generate_question_node(state: GameState):
 def process_answer_node(state: GameState):
     ans = state.get("player_answer", "")
     feature = state["current_question"].replace("这部电影", "").replace("吗？", "")
+    print(f"答: {ans}")
     if ans == "是":
         state["known_yes"].append(feature)
         state["message"] = "好的，记下了。"
@@ -48,12 +50,52 @@ def decide_after_question(state: GameState):
         return END
     return "process_answer"
 
+def step_node(state: GameState):
+    if state["game_over"]:
+        return state
+    if state.get("player_answer"):
+        ans = state["player_answer"]
+        feature = state["current_question"].replace("这部电影", "").replace("吗？", "")
+        if ans == "是":
+            state["known_yes"].append(feature)
+            state["message"] = "好的，记下了。"
+        elif ans == "否":
+            state["known_no"].append(feature)
+            state["message"] = "明白，排除这个方向。"
+        state["player_answer"] = ""
+        return state
+    asked = state["known_yes"] + state["known_no"]
+    next_q = None
+    for f in state["features"]:
+        if f not in asked:
+            next_q = f
+            break
+    if next_q is None:
+        if state["known_yes"]:
+            attrs = "、".join(state["known_yes"])
+            state["final_guess"] = f"我的猜测：一部{attrs}的电影"
+        else:
+            state["final_guess"] = "我的猜测：信息不足，无法确定具体电影"
+        state["message"] = "问题已全部问完，给出结论"
+        state["game_over"] = True
+        return state
+    if state["remaining_questions"] <= 0:
+        if state["known_yes"]:
+            attrs = "、".join(state["known_yes"])
+            state["final_guess"] = f"我的猜测：一部{attrs}的电影"
+        else:
+            state["final_guess"] = "我的猜测：信息不足，无法确定具体电影"
+        state["message"] = "机会用完啦，游戏结束！"
+        state["game_over"] = True
+        return state
+    state["current_question"] = f"这部电影{next_q}吗？"
+    state["remaining_questions"] -= 1
+    state["message"] = "请回答 是 或 否"
+    return state
+
 workflow = StateGraph(GameState)
-workflow.add_node("generate_question", generate_question_node)
-workflow.add_node("process_answer", process_answer_node)
-workflow.set_entry_point("generate_question")
-workflow.add_conditional_edges("generate_question", decide_after_question)
-workflow.add_edge("process_answer", "generate_question")
+workflow.add_node("step", step_node)
+workflow.set_entry_point("step")
 game_app = workflow.compile()
 
 def run_demo():
@@ -65,12 +107,13 @@ def run_demo():
         "game_over": False,
         "message": "游戏开始！我心里想了一部电影。",
         "player_answer": "",
-        "features": ["是1990年后的", "是科幻片", "主角是女性", "获得过奥斯卡"]
+        "features": ["是1990年后的", "是科幻片", "主角是女性", "获得过奥斯卡"],
+        "final_guess": ""
     }
     state = game_app.invoke(state)
     print(f"AI: {state['current_question']}")
 
-def run_cli(questions: int, features: List[str]):
+def run_cli(questions: int, features: List[str], answers: List[str] | None = None):
     state = {
         "remaining_questions": questions,
         "known_yes": [],
@@ -79,27 +122,38 @@ def run_cli(questions: int, features: List[str]):
         "game_over": False,
         "message": "",
         "player_answer": "",
-        "features": features
+        "features": features,
+        "final_guess": ""
     }
     state = game_app.invoke(state)
+    i = 0
     while not state["game_over"]:
         print(f"AI: {state['current_question']}")
-        ans = input("你的回答(是/否，q退出): ").strip().lower()
-        if ans in ["q", "quit", "exit"]:
-            break
-        if ans in ["是", "y", "yes"]:
+        if answers is not None and i < len(answers):
+            raw = answers[i].strip().lower()
+            i += 1
+        else:
+            raw = input("你的回答(是/否，q退出): ").strip().lower()
+            if raw in ["q", "quit", "exit"]:
+                break
+        if raw in ["是", "y", "yes", "true", "1"]:
             state["player_answer"] = "是"
-        elif ans in ["否", "n", "no"]:
+        elif raw in ["否", "n", "no", "false", "0"]:
             state["player_answer"] = "否"
         else:
             print("请输入 是 或 否")
             continue
         state = game_app.invoke(state)
         if state["game_over"]:
+            break
+        state = game_app.invoke(state)
+        if state["game_over"]:
             print("系统: 机会用完啦，游戏结束！")
             break
     print(f"已知是: {state['known_yes']}")
     print(f"已知否: {state['known_no']}")
+    if state.get("final_guess"):
+        print(state["final_guess"])
 
 if __name__ == "__main__":
     import argparse
@@ -107,6 +161,7 @@ if __name__ == "__main__":
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--questions", type=int, default=10)
     parser.add_argument("--features", type=str, default="")
+    parser.add_argument("--answers", type=str, default="")
     args = parser.parse_args()
     if args.demo:
         run_demo()
@@ -114,4 +169,5 @@ if __name__ == "__main__":
         feats = [s.strip() for s in args.features.split(",") if s.strip()]
         if not feats:
             feats = ["是1990年后的", "是科幻片", "主角是女性", "获得过奥斯卡"]
-        run_cli(args.questions, feats)
+        ans_list = [s.strip() for s in args.answers.split(",") if s.strip()]
+        run_cli(args.questions, feats, ans_list if ans_list else None)
